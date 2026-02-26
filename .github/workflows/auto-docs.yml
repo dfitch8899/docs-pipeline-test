@@ -19,22 +19,26 @@ jobs:
       - name: Check secrets
         run: |
           echo "FRONTEND_REPO_TOKEN exists? ${FRONTEND_REPO_TOKEN:+yes}"
-        env:
-          FRONTEND_REPO_TOKEN: ${{ secrets.FRONTEND_REPO_TOKEN }}
 
-      # Checkout backend repo (current repo)
+      # Checkout backend repo
       - name: Checkout backend
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # Checkout frontend repo (TEST REPO)
+      # Checkout frontend repo (test)
       - name: Checkout frontend (test)
         uses: actions/checkout@v4
         with:
-          repository: <your-username>/docs-pipeline-test
+          repository: dfitch8899/docs-pipeline-test
           token: ${{ secrets.FRONTEND_REPO_TOKEN }}
           path: flash-front
+
+      # Verify frontend checkout (proof)
+      - name: Verify frontend checkout
+        run: |
+          echo "Frontend repo contents:"
+          ls -la flash-front
 
       # Set up Python
       - name: Set up Python
@@ -44,24 +48,29 @@ jobs:
 
       # Install dependencies
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            echo "No requirements.txt found — skipping"
+          fi
 
-      # Run docs-bot to generate/update docs
+      # Run docs-bot to detect changes and generate/update MD files
       - name: Generate docs
         run: python docs-bot/main.py
 
-      # Identify changed markdown files
+      # Identify changed MD files
       - name: Get changed doc files
         id: changed
         run: |
-          FILES=$(git diff --name-only HEAD~1 HEAD -- "${{ env.DOCS_DIR }}" | grep '\.md$' || true)
+          FILES=$(git diff --name-only HEAD~1 HEAD -- "${DOCS_DIR}" | grep '\.md$' || true)
           FILES=$(echo "$FILES" | tr '\n' ' ')
           echo "files=$FILES" >> $GITHUB_OUTPUT
           echo "Count: $(echo $FILES | wc -w)"
 
-      # Dry-run publish step
+      # Publish to Confluence (dry run)
       - name: Publish to Confluence (dry run)
         if: steps.changed.outputs.files != ''
         run: |
-          echo "Would publish the following files:"
+          echo "Would publish files:"
           echo "${{ steps.changed.outputs.files }}"
