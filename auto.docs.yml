@@ -28,11 +28,12 @@ jobs:
 
       # Checkout frontend repo into subfolder
       - name: Checkout frontend
-        uses: actions/checkout@v4
-        with:
-          repository: AI-OWL/flash-front
-          token: ${{ secrets.FRONTEND_REPO_TOKEN }}
-          path: flash-front
+  uses: actions/checkout@v4
+  with:
+    repository: AI-OWL/flash-front
+    token: ${{ secrets.FRONTEND_REPO_TOKEN }}
+    path: flash-front
+
 
       # Set up Python
       - name: Set up Python
