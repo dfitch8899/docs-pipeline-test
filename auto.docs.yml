@@ -59,14 +59,9 @@ jobs:
           echo "Count: $(echo $FILES | wc -w)"
 
       # Publish to Confluence with AI summaries if enabled
-      - name: Publish to Confluence
-        if: steps.changed.outputs.files != ''
-        env:
-          CONFLUENCE_BASE_URL: ${{ secrets.CONFLUENCE_BASE_URL }}
-          CONFLUENCE_USER_EMAIL: ${{ secrets.CONFLUENCE_USER_EMAIL }}
-          CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
-          CONFLUENCE_PARENT_PAGE_ID: ${{ secrets.CONFLUENCE_PARENT_PAGE_ID }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          USE_AI_SUMMARY: ${{ vars.USE_AI_SUMMARY || 'true' }}
-          FILES: ${{ steps.changed.outputs.files }}
-        run: python scripts/publish_docs.py --files "$FILES"
+     - name: Publish to Confluence (dry run)
+  if: steps.changed.outputs.files != ''
+  run: |
+    echo "Would publish files:"
+    echo "${{ steps.changed.outputs.files }}"
+
