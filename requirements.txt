@@ -1,0 +1,220 @@
+# DEPRECATED: This file is deprecated. Use pyproject.toml as the source of truth.
+# This file is kept for backward compatibility only.
+# To install dependencies, use: pip install .  (or uv sync if using uv)
+# See MIGRATION.md for migration details.
+
+# Core web
+fastapi
+# Security: Pin starlette to patched version (O(n^2) DoS vulnerability fixed in >= 0.49.1)
+# O(n^2) DoS via Range header merging in starlette.responses.FileResponse
+# Affected: starlette >= 0.39.0, <= 0.49.0, Fixed in: 0.49.1
+# Issue: Crafted HTTP Range header triggers quadratic-time processing, causing CPU exhaustion
+# Reference: Starlette security issue #24, CVSS 7.5/10 (High)
+# Note: Starlette is a dependency of FastAPI, but we pin it explicitly for security
+starlette>=0.49.1
+uvicorn
+
+# Data / perf
+blosc2
+cython
+numpy
+ml-dtypes
+
+# Utilities
+dill
+requests_mock
+pkgconfig
+python-dotenv
+httpx
+requests
+# Security: Pin aiohttp to patched version (Multiple DoS vulnerabilities and cookie parser warning storm fixed in >= 3.13.3)
+# 1. DoS through large payloads (#42): Request can be crafted to cause memory exhaustion
+# 2. DoS through chunked messages (#43): Excessive blocking CPU usage when receiving large number of chunks
+# 3. DoS when bypassing asserts (#41): Infinite loop can occur when assert statements are bypassed
+# 4. Cookie parser warning storm (#44): Reading multiple invalid cookies can lead to logging storm
+# Affected: aiohttp <= 3.13.2, Fixed in: 3.13.3
+# Impact: Attackers can freeze servers by exhausting memory/CPU or trigger logging storms
+# Reference: aiohttp security issues #41, #42, #43, #44, CVSS 6.6/10 (Moderate) - 2.7/10 (Low for cookie parser)
+# Note: aiohttp is a transitive dependency, but we pin it explicitly for security
+aiohttp>=3.13.3
+pydantic
+python-multipart
+jsonschema
+ruff
+mypy
+pytz
+six>=1.16.0
+janus>=1.0.0
+
+# AWS SDKs
+botocore>=1.39.9,<1.40.0
+boto3>=1.39.0,<1.40.0
+# Explicitly pin s3transfer to match boto3/botocore compatibility window
+s3transfer>=0.13.0,<0.14.0
+
+# ML / LLMs
+transformers>=4.48
+# Security: langgraph-checkpoint RCE fix (CVE-2025-64439) requires langgraph 1.0.5+, but that conflicts with langchain 0.3.27
+# 
+# DEPENDENCY CONFLICT:
+#   - langgraph-checkpoint>=3.0.0 (RCE fix) requires langgraph>=1.0.5
+#   - langgraph>=1.0.5 requires langgraph-prebuilt>=1.0.2
+#   - langgraph-prebuilt>=1.0.2 requires langchain-core>=1.0.0
+#   - langchain 0.3.27 requires langchain-core<1.0.0
+#   - INCOMPATIBLE: Cannot upgrade without upgrading langchain ecosystem to 1.x
+#
+# Current status: langgraph==0.6.6 uses langgraph-checkpoint==2.1.1 (VULNERABLE to RCE)
+# 
+# SOLUTION REQUIRED:
+#   Upgrade langchain ecosystem to 1.x in a separate PR:
+#     - langchain: 0.3.27 → 1.x
+#     - langchain-core: 0.3.81 → 1.x
+#     - langchain-text-splitters: 0.3.9 → 1.x
+#     - langchain-aws: 0.2.13 → 1.x
+#   Then upgrade:
+#     - langgraph: 0.6.6 → 1.0.5+
+#     - langgraph-checkpoint: 2.1.1 → 3.0.0+
+#
+# For now, keeping langgraph==0.6.6 and documenting the known security risk
+langgraph==0.6.6
+# Security: Pin langgraph-checkpoint to patched version (RCE vulnerability fixed in >= 3.0.0)
+# RCE in "json" mode of JsonPlusSerializer
+# Affected: langgraph-checkpoint < 3.0.0, Fixed in: 3.0.0
+# Issue: Constructor-style deserialization allows arbitrary Python code execution during checkpoint load
+# Reference: LangGraph Checkpoint security issue #25, CVSS 7.4/10 (High)
+# 
+# BLOCKED: This constraint is commented out due to dependency conflict
+# langgraph-checkpoint>=3.0.0 requires langgraph>=1.0.5
+# langgraph>=1.0.5 requires langchain-core>=1.0.0
+# langchain 0.3.27 requires langchain-core<1.0.0
+# 
+# TODO: Upgrade langchain ecosystem to 1.x, then uncomment this line
+# langgraph-checkpoint>=3.0.0
+# LangChain: latest stable 0.3.x line. There is no v2 yet; this tracks >=0.3 as the highest major line available.
+langchain==0.3.27
+# Security: Pin langchain-core to patched version (Template Injection vulnerability fixed in >= 0.3.81)
+# Template Injection via Attribute Access in Prompt Templates
+# Affected: langchain-core <= 0.3.79, Fixed in: 0.3.80 (recommended: 0.3.81)
+# Issue: Allows attackers to access Python object internals through template syntax
+# Reference: LangChain security issue #32, CVSS 8.3/10 (High)
+langchain-core>=0.3.81
+langchain-text-splitters==0.3.9
+langchain-aws==0.2.13
+
+tokenizers
+safetensors
+
+# Security: Pin Keras to patched version (CVE-2025-9905 and CVE-2025-1550 fixed in >= 3.11.3)
+# CVE-2025-9905: Model.load_model silently ignores safe_mode=True for .h5/.hdf5 files, allowing arbitrary code execution
+# CVE-2025-1550: Previous security issue (fixed in 3.9.0, but 3.11.3+ recommended)
+# Affected: keras 3.0.0 to < 3.11.3, Fixed in: 3.11.3
+# Impact: Attackers can craft malicious .h5/.hdf5 model files that execute arbitrary code when loaded
+# Reference: Keras GHSA-36rr-ww3j-vrjv (CVE-2025-9905), CVSS High
+# https://github.com/keras-team/keras/security/advisories/GHSA-36rr-ww3j-vrjv
+keras>=3.11.3
+
+# Security
+defusedxml  # Safe XML parsing - prevents XXE attacks
+zxcvbn  # Password strength validator for CJIS compliance
+# Security: Pin fonttools to patched version (Arbitrary File Write and XML injection vulnerability fixed in >= 4.60.2)
+# Arbitrary File Write and XML injection in fontTools.varLib
+# Affected: fonttools >= 4.33.0, < 4.60.2, Fixed in: 4.60.2
+# Issue: Unsanitised filename handling combined with content injection allows path traversal and RCE
+# Reference: fontTools security issue #27, CVSS 6.3/10 (Moderate)
+# Note: fonttools is a transitive dependency, but we pin it explicitly for security
+fonttools>=4.60.2
+
+# Security: Pin urllib3 to patched version (Resource Consumption vulnerability fixed in >= 2.6.0)
+# Excessive resource consumption (CWE-409) via streaming API with highly compressed data
+# Affected: urllib3 >= 1.0, < 2.6.0, Fixed in: 2.6.0 (recommended: 2.6.3)
+# Issue: Decompression logic causes excessive CPU usage and memory allocation
+# Reference: urllib3 security issue #31, CVSS 8.9/10 (High)
+urllib3>=2.6.0
+
+# Security: Pin Pillow to patched version (Buffer overflow CVE-2025-1551 and buffer overflow #2 fixed in >= 10.3.0)
+# CVE-2025-1551: Arbitrary Code Execution via PIL.ImageMath.eval environment parameter (fixed in 10.2.0)
+# Buffer overflow #2: In _imagingcms.c, strcpy is used instead of strncpy, allowing buffer overflow (fixed in 10.3.0)
+# Affected: Pillow < 10.3.0, Fixed in: 10.3.0
+# Impact: Buffer overflow in _imagingcms.c can be exploited via crafted input
+# Reference: Pillow security issue #2, CVSS 7.3/10 (High)
+# https://github.com/advisories/GHSA-9w4w-cpc8-h2fq
+Pillow>=10.3.0
+
+# Security: Pin AIOHTTP to patched version (Multiple vulnerabilities fixed in >= 3.13.3)
+# Fixes six security vulnerabilities:
+# 1. Unicode processing parsing discrepancies (Dependabot #37): Request smuggling with non-ASCII characters
+# 2. Unicode match groups in regexes (#39): Potential request smuggling via Range header
+# 3. DoS when bypassing asserts (#41): Infinite loop vulnerability
+# 4. DoS through large payloads (#42): Memory exhaustion attacks
+# 5. DoS through chunked messages (#43): CPU exhaustion attacks
+# 6. Cookie parser warning storm (#44): Logging storm attacks
+# Severity: Low to Moderate (CVSS 2.7/10 - 6.6/10)
+# Reference: CPG-612
+aiohttp>=3.13.3
+
+# Security: Pin Authlib to patched version (Multiple vulnerabilities fixed)
+# Fixes two security vulnerabilities:
+# 1. JWE zip=DEF decompression bomb DoS (fixed in >= 1.6.5)
+#    - Unbounded DEFLATE decompression allows small ciphertext to expand into tens/hundreds of MB
+#    - Severity: Moderate to High (CVSS 6.5/10 - 7.5/10)
+#    - CVE: CVE-2025-62706, GHSA: GHSA-g7f3-828f-7h7m
+# 2. JWS/JWT crit header enforcement (fixed in >= 1.6.4)
+#    - Critical header bypass vulnerability
+# Reference: Dependabot #22, CPG-612
+authlib>=1.6.6
+
+# Crypto
+cryptography
+bcrypt
+python-jose[cryptography]
+# Security: Pin authlib to patched version (Multiple vulnerabilities fixed in >= 1.6.6)
+# 1. JWE zip=DEF decompression bomb DoS (fixed in >= 1.6.5, recommended: 1.6.6)
+#    - Unbounded DEFLATE decompression allows small ciphertext to expand into tens/hundreds of MB, causing DoS
+#    - Reference: Authlib security issue #22, CVE-2025-62706, GHSA-g7f3-828f-7h7m, CVSS 6.5/10 (Moderate) - 7.5/10 (High if PR:N)
+# 2. JWS/JWT crit header enforcement (fixed in >= 1.6.4, recommended: 1.6.6)
+#    - Accepts tokens with unknown crit headers, violating RFC requirements
+#    - Reference: Authlib security issue #20, CVSS 7.5/10 (High)
+# Affected: authlib < 1.6.5 (decompression bomb), < 1.6.4 (crit headers), Fixed in: 1.6.6 (covers both)
+# Note: authlib is a transitive dependency, but we pin it explicitly for security
+authlib>=1.6.6
+
+# Database
+psycopg2-binary  # PostgreSQL driver v2 (required for LISTEN/NOTIFY in jailcell/update_manager.py)
+psycopg[binary]>=3.2.0  # PostgreSQL driver v3 (for audit module and general use)
+sqlalchemy>=2.0.0  # ORM for PostgreSQL (facility, authentication, billing modules)
+asyncpg>=0.29.0  # Async PostgreSQL driver for SQLAlchemy async support
+greenlet>=3.0.0  # Required for SQLAlchemy async operations
+
+# Billing
+stripe>=11.1.0
+
+# Misc
+python-docx
+beautifulsoup4  # HTML parsing for HTML to DOCX conversion (Option 4A)
+openpyxl
+qrcode
+tiktoken
+networkx
+graphviz
+websockets
+
+# Support integrations
+slack-sdk
+
+# Security: Pin pymdown-extensions to patched version (ReDOS bug fixed in >= 10.16.1)
+# ReDOS bug in Figure Capture extension (pymdownx.blocks.caption)
+# Affected: pymdown-extensions < 10.16.1, Fixed in: 10.16.1
+# Issue: Regular expression pattern uses '.' instead of '\.', causing ReDOS on malicious input
+# Impact: Systems processing unchecked user content can experience long hangs
+# Reference: pymdown-extensions issue #2716, CVSS 2.7/10 (Low)
+# Note: pymdown-extensions is a transitive dependency, but we pin it explicitly for security
+pymdown-extensions>=10.16.1
+
+# Docbot additions
+markdown
+python-dotenv
+openai
+
+# GUI (restored)
+pyqt5
+pyqtwebengine
