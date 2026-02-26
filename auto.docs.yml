@@ -26,13 +26,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Checkout frontend repo into subfolder
-      - name: Checkout frontend
+    - name: Checkout frontend (test)
   uses: actions/checkout@v4
   with:
-    repository: AI-OWL/flash-front
+    repository: <your-username>/docs-pipeline-test
     token: ${{ secrets.FRONTEND_REPO_TOKEN }}
     path: flash-front
+
 
 
       # Set up Python
