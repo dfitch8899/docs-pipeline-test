@@ -1,4 +1,3 @@
-
 name: Auto Docs & Publish
 
 on:
@@ -27,24 +26,34 @@ jobs:
         with:
           fetch-depth: 0
 
-    - name: Checkout frontend (test)
-  uses: actions/checkout@v4
-  with:
-    repository: dfitch8899/docs-pipeline-test
-    token: ${{ secrets.FRONTEND_REPO_TOKEN }}
-    path: flash-front
+      # Checkout frontend repo (test)
+      - name: Checkout frontend (test)
+        uses: actions/checkout@v4
+        with:
+          repository: dfitch8899/docs-pipeline-test
+          token: ${{ secrets.FRONTEND_REPO_TOKEN }}
+          path: flash-front
 
-
+      # Verify frontend checkout (proof)
+      - name: Verify frontend checkout
+        run: |
+          echo "Frontend repo contents:"
+          ls -la flash-front
 
       # Set up Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       # Install dependencies
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            echo "No requirements.txt found — skipping"
+          fi
 
       # Run docs-bot to detect changes and generate/update MD files
       - name: Generate docs
@@ -54,14 +63,14 @@ jobs:
       - name: Get changed doc files
         id: changed
         run: |
-          FILES=$(git diff --name-only HEAD~1 HEAD -- "${{ env.DOCS_DIR }}" | grep '\.md$' || true)
+          FILES=$(git diff --name-only HEAD~1 HEAD -- "${DOCS_DIR}" | grep '\.md$' || true)
           FILES=$(echo "$FILES" | tr '\n' ' ')
           echo "files=$FILES" >> $GITHUB_OUTPUT
           echo "Count: $(echo $FILES | wc -w)"
 
-      # Publish to Confluence with AI summaries if enabled
-     - name: Publish to Confluence (dry run)
-  if: steps.changed.outputs.files != ''
-  run: |
-    echo "Would publish files:"
-    echo "${{ steps.changed.outputs.files }}"
+      # Publish to Confluence (dry run)
+      - name: Publish to Confluence (dry run)
+        if: steps.changed.outputs.files != ''
+        run: |
+          echo "Would publish files:"
+          echo "${{ steps.changed.outputs.files }}"
