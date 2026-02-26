@@ -30,7 +30,7 @@ jobs:
     - name: Checkout frontend (test)
   uses: actions/checkout@v4
   with:
-    repository: <your-username>/docs-pipeline-test
+    repository: dfitch8899/docs-pipeline-test
     token: ${{ secrets.FRONTEND_REPO_TOKEN }}
     path: flash-front
 
