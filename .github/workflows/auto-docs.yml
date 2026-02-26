@@ -1,0 +1,67 @@
+name: Auto Docs & Publish
+
+on:
+  push:
+    branches:
+      - backend
+      - dfitch8899-docbot
+  workflow_dispatch:
+
+env:
+  DOCS_DIR: docs
+
+jobs:
+  generate_and_publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Check if FRONTEND_REPO_TOKEN is available
+      - name: Check secrets
+        run: |
+          echo "FRONTEND_REPO_TOKEN exists? ${FRONTEND_REPO_TOKEN:+yes}"
+        env:
+          FRONTEND_REPO_TOKEN: ${{ secrets.FRONTEND_REPO_TOKEN }}
+
+      # Checkout backend repo (current repo)
+      - name: Checkout backend
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Checkout frontend repo (TEST REPO)
+      - name: Checkout frontend (test)
+        uses: actions/checkout@v4
+        with:
+          repository: <your-username>/docs-pipeline-test
+          token: ${{ secrets.FRONTEND_REPO_TOKEN }}
+          path: flash-front
+
+      # Set up Python
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Install dependencies
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # Run docs-bot to generate/update docs
+      - name: Generate docs
+        run: python docs-bot/main.py
+
+      # Identify changed markdown files
+      - name: Get changed doc files
+        id: changed
+        run: |
+          FILES=$(git diff --name-only HEAD~1 HEAD -- "${{ env.DOCS_DIR }}" | grep '\.md$' || true)
+          FILES=$(echo "$FILES" | tr '\n' ' ')
+          echo "files=$FILES" >> $GITHUB_OUTPUT
+          echo "Count: $(echo $FILES | wc -w)"
+
+      # Dry-run publish step
+      - name: Publish to Confluence (dry run)
+        if: steps.changed.outputs.files != ''
+        run: |
+          echo "Would publish the following files:"
+          echo "${{ steps.changed.outputs.files }}"
