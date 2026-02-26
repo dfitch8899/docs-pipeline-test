@@ -3,8 +3,7 @@ name: Auto Docs & Publish
 on:
   push:
     branches:
-      - backend
-      - dfitch8899-docbot
+      - main
   workflow_dispatch:
 
 env:
@@ -15,30 +14,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Check if FRONTEND_REPO_TOKEN is available
-      - name: Check secrets
-        run: |
-          echo "FRONTEND_REPO_TOKEN exists? ${FRONTEND_REPO_TOKEN:+yes}"
-
-      # Checkout backend repo
-      - name: Checkout backend
+      # Checkout repo
+      - name: Checkout repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      # Checkout frontend repo (test)
-      - name: Checkout frontend (test)
-        uses: actions/checkout@v4
-        with:
-          repository: dfitch8899/docs-pipeline-test
-          token: ${{ secrets.FRONTEND_REPO_TOKEN }}
-          path: flash-front
-
-      # Verify frontend checkout (proof)
-      - name: Verify frontend checkout
-        run: |
-          echo "Frontend repo contents:"
-          ls -la flash-front
 
       # Set up Python
       - name: Set up Python
@@ -46,7 +26,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      # Install dependencies
+      # Install dependencies (optional)
       - name: Install dependencies
         run: |
           if [ -f requirements.txt ]; then
@@ -54,10 +34,6 @@ jobs:
           else
             echo "No requirements.txt found — skipping"
           fi
-
-      # Run docs-bot to detect changes and generate/update MD files
-      - name: Generate docs
-        run: python docs-bot/main.py
 
       # Identify changed MD files
       - name: Get changed doc files
@@ -68,7 +44,7 @@ jobs:
           echo "files=$FILES" >> $GITHUB_OUTPUT
           echo "Count: $(echo $FILES | wc -w)"
 
-      # Publish to Confluence (dry run)
+      # Dry-run publish
       - name: Publish to Confluence (dry run)
         if: steps.changed.outputs.files != ''
         run: |
