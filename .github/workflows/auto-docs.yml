@@ -14,39 +14,33 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Checkout repo
-      - name: Checkout repo
+      - name: Checkout backend
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # Set up Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # Install dependencies (optional)
-      - name: Install dependencies
-        run: |
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          else
-            echo "No requirements.txt found — skipping"
-          fi
+      - name: Install deps
+        run: pip install markdown openai
 
-      # Identify changed MD files
-      - name: Get changed doc files
+      - name: Generate docs
+        env:
+          FRONTEND_REPO_TOKEN: ${{ secrets.FRONTEND_REPO_TOKEN }}
+        run: python docs-bot/main.py
+
+      - name: Get changed docs
         id: changed
         run: |
-          FILES=$(git diff --name-only HEAD~1 HEAD -- "${DOCS_DIR}" | grep '\.md$' || true)
+          FILES=$(git diff --name-only HEAD~1 HEAD -- docs | grep '\.md$' || true)
           FILES=$(echo "$FILES" | tr '\n' ' ')
           echo "files=$FILES" >> $GITHUB_OUTPUT
-          echo "Count: $(echo $FILES | wc -w)"
 
-      # Dry-run publish
       - name: Publish to Confluence (dry run)
         if: steps.changed.outputs.files != ''
-        run: |
-          echo "Would publish files:"
-          echo "${{ steps.changed.outputs.files }}"
+        env:
+          CONFLUENCE_PARENT_PAGE_ID: "123456789"
+        run: python scripts/publish_docs.py --files "${{ steps.changed.outputs.files }}"
