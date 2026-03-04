@@ -7,18 +7,25 @@ DOCS_DIR.mkdir(exist_ok=True)
 
 FRONTEND_REPO = "dfitch8899/flash-front-demo"
 TOKEN = os.environ.get("FRONTEND_REPO_TOKEN")
-
 if not TOKEN:
     raise RuntimeError("FRONTEND_REPO_TOKEN missing")
 
 clone_url = f"https://x-access-token:{TOKEN}@github.com/{FRONTEND_REPO}"
-
 if not Path("flash-front").exists():
     subprocess.run(["git", "clone", clone_url, "flash-front"], check=True)
 
-files = subprocess.check_output(
+result = subprocess.run(
     ["git", "-C", "flash-front", "diff", "--name-only", "HEAD~1..HEAD"],
-).decode().splitlines()
+    capture_output=True, text=True
+)
+
+if result.returncode != 0:
+    # Repo has only one commit, list all files instead
+    files = subprocess.check_output(
+        ["git", "-C", "flash-front", "ls-files"],
+    ).decode().splitlines()
+else:
+    files = result.stdout.splitlines()
 
 print("Frontend changes:")
 for f in files:
@@ -31,5 +38,4 @@ doc_path.write_text(
     "- Source: `src/Button.tsx`\n"
     "- Purpose: Reusable UI button\n"
 )
-
 print("Generated docs:", doc_path)
