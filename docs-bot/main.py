@@ -27,15 +27,31 @@ if result.returncode != 0:
 else:
     files = result.stdout.splitlines()
 
-print("Frontend changes:")
+print("Frontend files found:")
 for f in files:
     print("-", f)
 
 doc_path = DOCS_DIR / "frontend-components.md"
-doc_path.write_text(
-    "# Frontend Components\n\n"
-    "## Button\n"
-    "- Source: `src/Button.tsx`\n"
-    "- Purpose: Reusable UI button\n"
-)
+lines = ["# Frontend Components\n", f"_Source repo: `{FRONTEND_REPO}`_\n\n"]
+
+for f in files:
+    file_path = Path("flash-front") / f
+    if not file_path.exists() or not file_path.is_file():
+        continue
+
+    lines.append(f"## `{f}`\n")
+
+    # try to read as text, skip binaries
+    try:
+        content = file_path.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, PermissionError):
+        lines.append("_Binary or unreadable file, skipped._\n\n")
+        continue
+
+    suffix = file_path.suffix.lstrip(".")
+    lines.append(f"```{suffix}\n")
+    lines.append(content)
+    lines.append("```\n\n")
+
+doc_path.write_text("".join(lines))
 print("Generated docs:", doc_path)
