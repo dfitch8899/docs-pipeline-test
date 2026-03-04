@@ -54,6 +54,8 @@ jobs:
       # ---------------------------------------------
       - name: Generate docs
         run: python docs-bot/main.py
+        env:
+          FRONTEND_REPO_TOKEN: ${{ secrets.FRONTEND_REPO_TOKEN }}
 
       # ---------------------------------------------
       # 6. Show generated docs in logs (demo-friendly)
