@@ -29,7 +29,7 @@ jobs:
       - name: Checkout frontend
         uses: actions/checkout@v4
         with:
-          repository: dfitch8899/docs-pipeline-test   # your dummy frontend repo
+          repository: dfitch8899/flash-front-demo  # ✅ correct name
           token: ${{ secrets.FRONTEND_REPO_TOKEN }}
           path: flash-front
 
