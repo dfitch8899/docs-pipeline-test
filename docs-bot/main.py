@@ -6,13 +6,6 @@ DOCS_DIR = Path("docs")
 DOCS_DIR.mkdir(exist_ok=True)
 
 FRONTEND_REPO = "dfitch8899/flash-front-demo"
-TOKEN = os.environ.get("FRONTEND_REPO_TOKEN")
-if not TOKEN:
-    raise RuntimeError("FRONTEND_REPO_TOKEN missing")
-
-clone_url = f"https://x-access-token:{TOKEN}@github.com/{FRONTEND_REPO}"
-if not Path("flash-front").exists():
-    subprocess.run(["git", "clone", clone_url, "flash-front"], check=True)
 
 result = subprocess.run(
     ["git", "-C", "flash-front", "diff", "--name-only", "HEAD~1..HEAD"],
