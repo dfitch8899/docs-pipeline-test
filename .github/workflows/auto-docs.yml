@@ -29,7 +29,8 @@ jobs:
       - name: Checkout frontend
         uses: actions/checkout@v4
         with:
-          repository: dfitch8899/flash-front-demo  # ✅ correct name
+          # To switch back to flash-front-demo: repository: dfitch8899/flash-front-demo
+          repository: NeelMawakar/Flash-Doc-Bot-Testing
           token: ${{ secrets.FRONTEND_REPO_TOKEN }}
           path: flash-front
 

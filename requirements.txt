@@ -213,7 +213,7 @@ pymdown-extensions>=10.16.1
 # Docbot additions
 markdown
 python-dotenv
-openai
+anthropic
 
 # GUI (restored)
 pyqt5
