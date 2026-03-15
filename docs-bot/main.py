@@ -9,8 +9,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DOCS_DIR = Path("docs")
+DOCS_DIR.mkdir(exist_ok=True)
 
-# Instructions for AI when USE_AI_SUMMARY=true: structure generated docs like formal Confluence docs (Overview, Architecture, Flow, Configuration, Security).
+FRONT_ROOT = Path("flash-front")
+FRONTEND_REPO = "dfitch8899/flash-front-demo"
+
+INCLUDE_EXT = {".tsx", ".ts", ".js", ".jsx", ".md", ".json", ".css"}
+MAX_FILE_SIZE = 100_000  # bytes
+
 DOC_STYLE_INSTRUCTIONS = """Structure the documentation as follows, even when there is little code:
 
 1. **Title**: Clear feature/system name and subtitle (e.g. "X Documentation: Architecture, Flow, and Security Measures").
@@ -32,26 +38,20 @@ DOC_STYLE_INSTRUCTIONS = """Structure the documentation as follows, even when th
 9. **UI Components** (if applicable): Bullet list of components and what they do (e.g. "AttachmentPreview: shows thumbnails, progress, remove button").
 
 Keep the tone technical and concise. Prefer tables and bullets over paragraphs. Include code only when it illustrates the flow or contract; otherwise reference file paths and purpose."""
-DOCS_DIR.mkdir(exist_ok=True)
 
-FRONTEND_REPO = "dfitch8899/flash-front-demo"
-TOKEN = os.environ.get("FRONTEND_REPO_TOKEN")
-if not TOKEN:
-    raise RuntimeError("FRONTEND_REPO_TOKEN missing")
 
-clone_url = f"https://x-access-token:{TOKEN}@github.com/{FRONTEND_REPO}"
-if not Path("flash-front").exists():
-    subprocess.run(["git", "clone", clone_url, "flash-front"], check=True)
-
+# -------------------------------------------------------
+# Get changed (or all) files from frontend repo
+# -------------------------------------------------------
 result = subprocess.run(
-    ["git", "-C", "flash-front", "diff", "--name-only", "HEAD~1..HEAD"],
+    ["git", "-C", str(FRONT_ROOT), "diff", "--name-only", "HEAD~1..HEAD"],
     capture_output=True, text=True
 )
 
 if result.returncode != 0:
-    # Repo has only one commit, list all files instead
+    # Only one commit — list all tracked files
     files = subprocess.check_output(
-        ["git", "-C", "flash-front", "ls-files"],
+        ["git", "-C", str(FRONT_ROOT), "ls-files"],
     ).decode().splitlines()
 else:
     files = result.stdout.splitlines()
@@ -59,6 +59,13 @@ else:
 print("Frontend changes:")
 for f in files:
     print("-", f)
+
+# -------------------------------------------------------
+# Build raw markdown from file contents
+# -------------------------------------------------------
+lines = [f"# Frontend Components\n\n", f"_Source repo: `{FRONTEND_REPO}`_\n\n"]
+
+for f in files:
     path = FRONT_ROOT / f
     if not path.exists() or path.is_dir():
         continue
@@ -66,22 +73,25 @@ for f in files:
         continue
     try:
         size = path.stat().st_size
-        if size > max_size:
+        if size > MAX_FILE_SIZE:
             lines.append(f"## `{f}`\n\n*(file too large to include)*\n\n")
             continue
         content = path.read_text(encoding="utf-8", errors="replace")
     except Exception as e:
         lines.append(f"## `{f}`\n\n*(read error: {e})*\n\n")
         continue
+
     ext = path.suffix.lower()
-    lang = "tsx" if ext == ".tsx" else "ts" if ext == ".ts" else "js" if ext in (".js", ".jsx") else "md" if ext == ".md" else "json" if ext == ".json" else "css"
+    lang = {"tsx": "tsx", ".ts": "ts", ".js": "js", ".jsx": "js", ".md": "md", ".json": "json", ".css": "css"}.get(ext, "")
     lines.append(f"## `{f}`\n\n```{lang}\n{content.strip()}\n```\n\n")
 
 raw_md = "".join(lines)
 
 
+# -------------------------------------------------------
+# Optionally reformat with Claude
+# -------------------------------------------------------
 def format_doc_with_ai(raw_markdown: str) -> str:
-    """If ANTHROPIC_API_KEY and USE_AI_SUMMARY=true, ask Claude to restructure raw doc per DOC_STYLE_INSTRUCTIONS. Else return as-is."""
     if os.environ.get("USE_AI_SUMMARY", "").lower() not in ("true", "1", "yes"):
         return raw_markdown
     api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -93,8 +103,6 @@ def format_doc_with_ai(raw_markdown: str) -> str:
         model = os.environ.get("CLAUDE_DOC_MODEL", "claude-sonnet-4-6")
         fallback = "claude-3-haiku-20240307"
         for m in (model, fallback):
-            if m != model and model == fallback:
-                break
             try:
                 r = client.messages.create(
                     model=m,
@@ -116,18 +124,19 @@ def format_doc_with_ai(raw_markdown: str) -> str:
 
 
 final_md = format_doc_with_ai(raw_md)
+
+# -------------------------------------------------------
+# Write final doc
+# -------------------------------------------------------
 doc_path = DOCS_DIR / "frontend-components.md"
-doc_path.write_text(
-    "# Frontend Components\n\n"
-    "## Button\n"
-    "- Source: `src/Button.tsx`\n"
-    "- Purpose: Reusable UI button\n"
-)
+doc_path.write_text(final_md)
 print("Generated docs:", doc_path)
 
 
+# -------------------------------------------------------
+# Publish to Confluence (optional)
+# -------------------------------------------------------
 def publish_to_confluence(md_path: Path) -> None:
-    """Create a Confluence page from the generated markdown. Requires env: CONFLUENCE_BASE_URL, CONFLUENCE_USER_EMAIL, CONFLUENCE_API_TOKEN, CONFLUENCE_PARENT_PAGE_ID."""
     base = os.environ.get("CONFLUENCE_BASE_URL", "").rstrip("/")
     email = os.environ.get("CONFLUENCE_USER_EMAIL")
     api_token = os.environ.get("CONFLUENCE_API_TOKEN")
@@ -138,71 +147,28 @@ def publish_to_confluence(md_path: Path) -> None:
     api_base = f"{base}/wiki/rest/api"
     auth = (email, api_token)
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
-    # Get parent page to obtain space key
-    r = requests.get(
-        f"{api_base}/content/{parent_id}",
-        params={"expand": "space"},
-        auth=auth,
-        headers=headers,
-        timeout=30,
-    )
+    r = requests.get(f"{api_base}/content/{parent_id}", params={"expand": "space"}, auth=auth, headers=headers, timeout=30)
     r.raise_for_status()
     space_key = r.json()["space"]["key"]
-    # Convert markdown to HTML for Confluence storage
     md_text = md_path.read_text(encoding="utf-8")
     html = markdown.markdown(md_text, extensions=["fenced_code", "tables"])
     storage_value = html if html.strip().startswith("<") else f"<p>{html}</p>"
     title = "Frontend Components"
-    body_payload = {
-        "storage": {"value": storage_value, "representation": "storage"}
-    }
-    # Check for existing page with same title under parent
-    r = requests.get(
-        f"{api_base}/content/{parent_id}/child/page",
-        auth=auth,
-        headers=headers,
-        timeout=30,
-    )
+    body_payload = {"storage": {"value": storage_value, "representation": "storage"}}
+    r = requests.get(f"{api_base}/content/{parent_id}/child/page", auth=auth, headers=headers, timeout=30)
     r.raise_for_status()
-    existing = next(
-        (p for p in r.json().get("results", []) if p.get("title") == title),
-        None,
-    )
+    existing = next((p for p in r.json().get("results", []) if p.get("title") == title), None)
     if existing:
         page_id = existing["id"]
-        r = requests.get(
-            f"{api_base}/content/{page_id}",
-            params={"expand": "body.storage,version"},
-            auth=auth,
-            headers=headers,
-            timeout=30,
-        )
+        r = requests.get(f"{api_base}/content/{page_id}", params={"expand": "body.storage,version"}, auth=auth, headers=headers, timeout=30)
         r.raise_for_status()
         version = r.json()["version"]["number"] + 1
-        r = requests.put(
-            f"{api_base}/content/{page_id}",
-            json={"id": page_id, "type": "page", "title": title, "version": {"number": version}, "body": body_payload},
-            auth=auth,
-            headers=headers,
-            timeout=30,
-        )
+        r = requests.put(f"{api_base}/content/{page_id}", json={"id": page_id, "type": "page", "title": title, "version": {"number": version}, "body": body_payload}, auth=auth, headers=headers, timeout=30)
         r.raise_for_status()
         print("Confluence: page updated at", r.json().get("_links", {}).get("webui", ""))
     else:
-        payload = {
-            "type": "page",
-            "title": title,
-            "ancestors": [{"id": parent_id}],
-            "space": {"key": space_key},
-            "body": body_payload,
-        }
-        r = requests.post(
-            f"{api_base}/content",
-            json=payload,
-            auth=auth,
-            headers=headers,
-            timeout=30,
-        )
+        payload = {"type": "page", "title": title, "ancestors": [{"id": parent_id}], "space": {"key": space_key}, "body": body_payload}
+        r = requests.post(f"{api_base}/content", json=payload, auth=auth, headers=headers, timeout=30)
         r.raise_for_status()
         print("Confluence: page created at", r.json().get("_links", {}).get("webui", ""))
 
