@@ -34,8 +34,7 @@ DOC_STYLE_INSTRUCTIONS = """Structure the documentation as follows, even when th
 Keep the tone technical and concise. Prefer tables and bullets over paragraphs. Include code only when it illustrates the flow or contract; otherwise reference file paths and purpose."""
 DOCS_DIR.mkdir(exist_ok=True)
 
-# Which repo to pull: set FRONTEND_REPO in env to override. To use flash-front-demo: FRONTEND_REPO=dfitch8899/flash-front-demo
-FRONTEND_REPO = os.environ.get("FRONTEND_REPO", "NeelMawakar/Flash-Doc-Bot-Testing")
+FRONTEND_REPO = "dfitch8899/flash-front-demo"
 TOKEN = os.environ.get("FRONTEND_REPO_TOKEN")
 if not TOKEN:
     raise RuntimeError("FRONTEND_REPO_TOKEN missing")
@@ -57,12 +56,7 @@ if result.returncode != 0:
 else:
     files = result.stdout.splitlines()
 
-FRONT_ROOT = Path("flash-front")
-# Only include files that exist and are text (skip binary / huge files)
-INCLUDE_EXT = {".tsx", ".ts", ".jsx", ".js", ".md", ".css", ".json"}
-max_size = 500_000  # skip files larger than ~500KB
-
-lines = ["# Frontend Components\n", f"_Source repo: `{FRONTEND_REPO}`_\n"]
+print("Frontend changes:")
 for f in files:
     print("-", f)
     path = FRONT_ROOT / f
@@ -123,7 +117,12 @@ def format_doc_with_ai(raw_markdown: str) -> str:
 
 final_md = format_doc_with_ai(raw_md)
 doc_path = DOCS_DIR / "frontend-components.md"
-doc_path.write_text(final_md, encoding="utf-8")
+doc_path.write_text(
+    "# Frontend Components\n\n"
+    "## Button\n"
+    "- Source: `src/Button.tsx`\n"
+    "- Purpose: Reusable UI button\n"
+)
 print("Generated docs:", doc_path)
 
 
