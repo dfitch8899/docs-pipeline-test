@@ -30,6 +30,7 @@ jobs:
           repository: dfitch8899/flash-front-demo
           ssh-key: ${{ secrets.FRONTEND_DEPLOY_KEY }}
           path: flash-front
+          ref: main
       # ---------------------------------------------
       # 3. Set up Python
       # ---------------------------------------------
