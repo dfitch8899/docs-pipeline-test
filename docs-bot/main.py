@@ -82,7 +82,7 @@ for f in files:
         continue
 
     ext = path.suffix.lower()
-    lang = {"tsx": "tsx", ".ts": "ts", ".js": "js", ".jsx": "js", ".md": "md", ".json": "json", ".css": "css"}.get(ext, "")
+    lang = {".tsx": "tsx", ".ts": "ts", ".js": "js", ".jsx": "js", ".md": "md", ".json": "json", ".css": "css"}.get(ext, "")
     lines.append(f"## `{f}`\n\n```{lang}\n{content.strip()}\n```\n\n")
 
 raw_md = "".join(lines)
