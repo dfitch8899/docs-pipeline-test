@@ -12,10 +12,15 @@ DOCS_DIR = Path("docs")
 DOCS_DIR.mkdir(exist_ok=True)
 
 FRONT_ROOT = Path("flash-front")
+BACK_ROOT = Path(".")  # backend repo is the current working directory
 FRONTEND_REPO = "dfitch8899/flash-front-demo"
+BACKEND_REPO = "dfitch8899/docs-pipeline-test"
 
-INCLUDE_EXT = {".tsx", ".ts", ".js", ".jsx", ".md", ".json", ".css"}
+INCLUDE_EXT = {".tsx", ".ts", ".js", ".jsx", ".md", ".json", ".css", ".py"}
 MAX_FILE_SIZE = 100_000  # bytes
+
+# Dirs to skip in backend
+BACK_EXCLUDE_DIRS = {".git", "docs", "flash-front", ".github", "__pycache__", "node_modules", ".venv"}
 
 DOC_STYLE_INSTRUCTIONS = """Structure the documentation as follows, even when there is little code:
 
@@ -41,55 +46,48 @@ Keep the tone technical and concise. Prefer tables and bullets over paragraphs. 
 
 
 # -------------------------------------------------------
-# Get changed (or all) files from frontend repo
+# Helper: build markdown from a list of files
 # -------------------------------------------------------
-result = subprocess.run(
-    ["git", "-C", str(FRONT_ROOT), "diff", "--name-only", "HEAD~1..HEAD"],
-    capture_output=True, text=True
-)
-
-if result.returncode != 0:
-    # Only one commit — list all tracked files
-    files = subprocess.check_output(
-        ["git", "-C", str(FRONT_ROOT), "ls-files"],
-    ).decode().splitlines()
-else:
-    files = result.stdout.splitlines()
-
-print("Frontend changes:")
-for f in files:
-    print("-", f)
-
-# -------------------------------------------------------
-# Build raw markdown from file contents
-# -------------------------------------------------------
-lines = [f"# Frontend Components\n\n", f"_Source repo: `{FRONTEND_REPO}`_\n\n"]
-
-for f in files:
-    path = FRONT_ROOT / f
-    if not path.exists() or path.is_dir():
-        continue
-    if path.suffix.lower() not in INCLUDE_EXT and path.name not in ("README.md",):
-        continue
-    try:
-        size = path.stat().st_size
-        if size > MAX_FILE_SIZE:
-            lines.append(f"## `{f}`\n\n*(file too large to include)*\n\n")
+def build_raw_md(files: list, root: Path, repo_name: str) -> str:
+    lines = [f"# Components\n\n", f"_Source repo: `{repo_name}`_\n\n"]
+    for f in files:
+        path = root / f
+        if not path.exists() or path.is_dir():
             continue
-        content = path.read_text(encoding="utf-8", errors="replace")
-    except Exception as e:
-        lines.append(f"## `{f}`\n\n*(read error: {e})*\n\n")
-        continue
-
-    ext = path.suffix.lower()
-    lang = {".tsx": "tsx", ".ts": "ts", ".js": "js", ".jsx": "js", ".md": "md", ".json": "json", ".css": "css"}.get(ext, "")
-    lines.append(f"## `{f}`\n\n```{lang}\n{content.strip()}\n```\n\n")
-
-raw_md = "".join(lines)
+        if path.suffix.lower() not in INCLUDE_EXT and path.name not in ("README.md",):
+            continue
+        try:
+            size = path.stat().st_size
+            if size > MAX_FILE_SIZE:
+                lines.append(f"## `{f}`\n\n*(file too large to include)*\n\n")
+                continue
+            content = path.read_text(encoding="utf-8", errors="replace")
+        except Exception as e:
+            lines.append(f"## `{f}`\n\n*(read error: {e})*\n\n")
+            continue
+        ext = path.suffix.lower()
+        lang = {".tsx": "tsx", ".ts": "ts", ".js": "js", ".jsx": "js", ".md": "md", ".json": "json", ".css": "css", ".py": "python"}.get(ext, "")
+        lines.append(f"## `{f}`\n\n```{lang}\n{content.strip()}\n```\n\n")
+    return "".join(lines)
 
 
 # -------------------------------------------------------
-# Optionally reformat with Claude
+# Helper: get changed or all files from a git repo
+# -------------------------------------------------------
+def get_files(repo_path: Path) -> list:
+    result = subprocess.run(
+        ["git", "-C", str(repo_path), "diff", "--name-only", "HEAD~1..HEAD"],
+        capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        return subprocess.check_output(
+            ["git", "-C", str(repo_path), "ls-files"],
+        ).decode().splitlines()
+    return result.stdout.splitlines()
+
+
+# -------------------------------------------------------
+# Helper: reformat with Claude
 # -------------------------------------------------------
 def format_doc_with_ai(raw_markdown: str) -> str:
     if os.environ.get("USE_AI_SUMMARY", "").lower() not in ("true", "1", "yes"):
@@ -123,20 +121,10 @@ def format_doc_with_ai(raw_markdown: str) -> str:
         return raw_markdown
 
 
-final_md = format_doc_with_ai(raw_md)
-
 # -------------------------------------------------------
-# Write final doc
+# Helper: publish a doc to Confluence
 # -------------------------------------------------------
-doc_path = DOCS_DIR / "frontend-components.md"
-doc_path.write_text(final_md)
-print("Generated docs:", doc_path)
-
-
-# -------------------------------------------------------
-# Publish to Confluence (optional)
-# -------------------------------------------------------
-def publish_to_confluence(md_path: Path) -> None:
+def publish_to_confluence(md_path: Path, title: str) -> None:
     base = os.environ.get("CONFLUENCE_BASE_URL", "").rstrip("/")
     email = os.environ.get("CONFLUENCE_USER_EMAIL")
     api_token = os.environ.get("CONFLUENCE_API_TOKEN")
@@ -153,7 +141,6 @@ def publish_to_confluence(md_path: Path) -> None:
     md_text = md_path.read_text(encoding="utf-8")
     html = markdown.markdown(md_text, extensions=["fenced_code", "tables"])
     storage_value = html if html.strip().startswith("<") else f"<p>{html}</p>"
-    title = "Frontend Components"
     body_payload = {"storage": {"value": storage_value, "representation": "storage"}}
     r = requests.get(f"{api_base}/content/{parent_id}/child/page", auth=auth, headers=headers, timeout=30)
     r.raise_for_status()
@@ -165,12 +152,40 @@ def publish_to_confluence(md_path: Path) -> None:
         version = r.json()["version"]["number"] + 1
         r = requests.put(f"{api_base}/content/{page_id}", json={"id": page_id, "type": "page", "title": title, "version": {"number": version}, "body": body_payload}, auth=auth, headers=headers, timeout=30)
         r.raise_for_status()
-        print("Confluence: page updated at", r.json().get("_links", {}).get("webui", ""))
+        print(f"Confluence: '{title}' updated at", r.json().get("_links", {}).get("webui", ""))
     else:
         payload = {"type": "page", "title": title, "ancestors": [{"id": parent_id}], "space": {"key": space_key}, "body": body_payload}
         r = requests.post(f"{api_base}/content", json=payload, auth=auth, headers=headers, timeout=30)
         r.raise_for_status()
-        print("Confluence: page created at", r.json().get("_links", {}).get("webui", ""))
+        print(f"Confluence: '{title}' created at", r.json().get("_links", {}).get("webui", ""))
 
 
-publish_to_confluence(doc_path)
+# -------------------------------------------------------
+# Frontend docs
+# -------------------------------------------------------
+print("=== FRONTEND ===")
+front_files = get_files(FRONT_ROOT)
+print("Frontend files:", front_files)
+front_raw = build_raw_md(front_files, FRONT_ROOT, FRONTEND_REPO)
+front_final = format_doc_with_ai(front_raw)
+front_doc = DOCS_DIR / "frontend-components.md"
+front_doc.write_text(front_final)
+print("Generated:", front_doc)
+publish_to_confluence(front_doc, "Frontend Components")
+
+
+# -------------------------------------------------------
+# Backend docs
+# -------------------------------------------------------
+print("=== BACKEND ===")
+back_files = [
+    f for f in get_files(BACK_ROOT)
+    if not any(f.startswith(ex) for ex in BACK_EXCLUDE_DIRS)
+]
+print("Backend files:", back_files)
+back_raw = build_raw_md(back_files, BACK_ROOT, BACKEND_REPO)
+back_final = format_doc_with_ai(back_raw)
+back_doc = DOCS_DIR / "backend-components.md"
+back_doc.write_text(back_final)
+print("Generated:", back_doc)
+publish_to_confluence(back_doc, "Backend Components")
