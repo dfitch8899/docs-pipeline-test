@@ -12,14 +12,13 @@ DOCS_DIR = Path("docs")
 DOCS_DIR.mkdir(exist_ok=True)
 
 FRONT_ROOT = Path("flash-front")
-BACK_ROOT = Path(".")  # backend repo is the current working directory
+BACK_ROOT = Path(".")
 FRONTEND_REPO = "dfitch8899/flash-front-demo"
 BACKEND_REPO = "dfitch8899/docs-pipeline-test"
 
 INCLUDE_EXT = {".tsx", ".ts", ".js", ".jsx", ".md", ".json", ".css", ".py"}
 MAX_FILE_SIZE = 100_000  # bytes
 
-# Dirs to skip in backend
 BACK_EXCLUDE_DIRS = {".git", "docs", "flash-front", ".github", "__pycache__", "node_modules", ".venv"}
 
 DOC_STYLE_INSTRUCTIONS = """Structure the documentation as follows, even when there is little code:
@@ -46,6 +45,22 @@ Keep the tone technical and concise. Prefer tables and bullets over paragraphs. 
 
 
 # -------------------------------------------------------
+# Helper: get changed or all files from a git repo
+# -------------------------------------------------------
+def get_files(repo_path: Path, all_files: bool = False) -> list:
+    if not all_files:
+        result = subprocess.run(
+            ["git", "-C", str(repo_path), "diff", "--name-only", "HEAD~1..HEAD"],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.splitlines()
+    return subprocess.check_output(
+        ["git", "-C", str(repo_path), "ls-files"],
+    ).decode().splitlines()
+
+
+# -------------------------------------------------------
 # Helper: build markdown from a list of files
 # -------------------------------------------------------
 def build_raw_md(files: list, root: Path, repo_name: str) -> str:
@@ -69,21 +84,6 @@ def build_raw_md(files: list, root: Path, repo_name: str) -> str:
         lang = {".tsx": "tsx", ".ts": "ts", ".js": "js", ".jsx": "js", ".md": "md", ".json": "json", ".css": "css", ".py": "python"}.get(ext, "")
         lines.append(f"## `{f}`\n\n```{lang}\n{content.strip()}\n```\n\n")
     return "".join(lines)
-
-
-# -------------------------------------------------------
-# Helper: get changed or all files from a git repo
-# -------------------------------------------------------
-def get_files(repo_path: Path) -> list:
-    result = subprocess.run(
-        ["git", "-C", str(repo_path), "diff", "--name-only", "HEAD~1..HEAD"],
-        capture_output=True, text=True
-    )
-    if result.returncode != 0:
-        return subprocess.check_output(
-            ["git", "-C", str(repo_path), "ls-files"],
-        ).decode().splitlines()
-    return result.stdout.splitlines()
 
 
 # -------------------------------------------------------
@@ -179,7 +179,7 @@ publish_to_confluence(front_doc, "Frontend Components")
 # -------------------------------------------------------
 print("=== BACKEND ===")
 back_files = [
-    f for f in get_files(BACK_ROOT)
+    f for f in get_files(BACK_ROOT, all_files=True)
     if not any(f.startswith(ex) for ex in BACK_EXCLUDE_DIRS)
 ]
 print("Backend files:", back_files)
