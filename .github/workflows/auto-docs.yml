@@ -37,6 +37,7 @@ jobs:
           repository: dfitch8899/flash-front-demo
           path: flash-front
           ref: main
+          fetch-depth: 0
       # ---------------------------------------------
       # 3. Set up Python
       # ---------------------------------------------
