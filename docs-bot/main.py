@@ -49,12 +49,25 @@ Keep the tone technical and concise. Prefer tables and bullets over paragraphs. 
 # -------------------------------------------------------
 def get_files(repo_path: Path, all_files: bool = False) -> list:
     if not all_files:
-        result = subprocess.run(
-            ["git", "-C", str(repo_path), "diff", "--name-only", "HEAD~1..HEAD"],
-            capture_output=True, text=True
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.splitlines()
+        # Find last commits not made by docs-bot
+        log = subprocess.check_output(
+            ["git", "-C", str(repo_path), "log", "--format=%H %ae", "-20"],
+        ).decode().splitlines()
+        human_commits = [
+            line.split()[0] for line in log
+            if "docs-bot" not in line
+        ]
+        if len(human_commits) >= 2:
+            return subprocess.check_output(
+                ["git", "-C", str(repo_path), "diff", "--name-only",
+                 f"{human_commits[1]}..{human_commits[0]}"],
+            ).decode().splitlines()
+        elif len(human_commits) == 1:
+            # Only one human commit, list all files in that commit
+            return subprocess.check_output(
+                ["git", "-C", str(repo_path), "diff-tree", "--no-commit-id",
+                 "-r", "--name-only", human_commits[0]],
+            ).decode().splitlines()
     return subprocess.check_output(
         ["git", "-C", str(repo_path), "ls-files"],
     ).decode().splitlines()
@@ -179,7 +192,7 @@ publish_to_confluence(front_doc, "Frontend Components")
 # -------------------------------------------------------
 print("=== BACKEND ===")
 back_files = [
-    f for f in get_files(BACK_ROOT, all_files=True)
+    f for f in get_files(BACK_ROOT, all_files=False)
     if not any(f.startswith(ex) for ex in BACK_EXCLUDE_DIRS)
 ]
 print("Backend files:", back_files)
