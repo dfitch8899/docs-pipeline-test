@@ -194,10 +194,19 @@ publish_to_confluence(front_doc, "Frontend Components")
 # Backend docs
 # -------------------------------------------------------
 print("=== BACKEND ===")
+back_files_raw = get_files(BACK_ROOT, all_files=False)
 back_files = [
-    f for f in get_files(BACK_ROOT, all_files=False)
+    f for f in back_files_raw
     if not any(f.startswith(ex) for ex in BACK_EXCLUDE_DIRS)
 ]
+
+# if filtering removed everything, fall back to all tracked files
+if not back_files:
+    back_files = [
+        f for f in get_files(BACK_ROOT, all_files=True)
+        if not any(f.startswith(ex) for ex in BACK_EXCLUDE_DIRS)
+    ]
+
 print("Backend files:", back_files)
 back_raw = build_raw_md(back_files, BACK_ROOT, BACKEND_REPO)
 back_final = format_doc_with_ai(back_raw)
