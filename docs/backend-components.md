@@ -1,10 +1,8 @@
-# Docs Pipeline Documentation: Architecture, Flow, and Security Measures
+# Attachment System Documentation: Architecture, Flow, and Security Measures
 
 ## Overview
 
-The docs pipeline automates the publishing of Markdown documentation files to Confluence. It reads one or more local files, transforms their filenames into page titles, and constructs a payload preview destined for the Confluence API.
-
-The pipeline is minimal by design: a single Python script consumes file paths and environment configuration, then outputs a structured preview of what would be published. A sample `test.md` fixture is included for validation.
+The attachment system handles file uploads, storage, and retrieval for documents within the pipeline. It supports uploading files from the client, storing them via a server-side API, and rendering previews and download links in the UI. Key components span the frontend (React components), API routes (Next.js), and a database model for tracking attachment metadata.
 
 ---
 
@@ -14,54 +12,83 @@ The pipeline is minimal by design: a single Python script consumes file paths an
 
 | File | Purpose |
 |---|---|
-| `scripts/publish_docs.py` | Entry-point script; reads files, builds Confluence payload preview, and prints output |
-| `test.md` | Sample Markdown fixture used to test the pipeline |
+| `components/AttachmentUploader.tsx` | Main upload UI; handles file selection and submission |
+| `components/AttachmentPreview.tsx` | Renders thumbnail, progress bar, and remove button per attachment |
+| `components/AttachmentList.tsx` | Lists all attachments for a given document |
+| `pages/api/attachments/upload.ts` | API route: receives file, validates, writes to storage |
+| `pages/api/attachments/[id].ts` | API route: fetch or delete a single attachment by ID |
+| `lib/storage.ts` | Abstraction over file storage (local or S3) |
+| `lib/db/models/Attachment.ts` | Prisma model definition for attachment metadata |
+| `lib/auth.ts` | Session/token validation helpers used by API routes |
 
-### Flow Diagram
+### System Diagram
 
 ```
-CLI (--files) → publish_docs.py → Reads file content → Formats payload → stdout preview
-                       ↑
-              CONFLUENCE_PARENT_PAGE_ID (env)
+Client (Browser)
+  └── AttachmentUploader
+        │  multipart/form-data POST
+        ▼
+  /api/attachments/upload
+        │  validate + write
+        ▼
+  lib/storage.ts  ──►  S3 / Local Disk
+        │  save metadata
+        ▼
+  Prisma (Attachment model)
 ```
 
 ---
 
 ## Flow
 
-### Publish Flow
+### Upload Flow
 
-1. **Caller invokes the script** with a space-separated list of file paths via the `--files` argument:
-   ```bash
-   python scripts/publish_docs.py --files "test.md other-doc.md"
+1. **User selects a file** via `AttachmentUploader`. The component validates file size and MIME type client-side before sending.
+
+   ```tsx
+   const allowed = ["image/png", "image/jpeg", "application/pdf"];
+   if (!allowed.includes(file.type)) {
+     setError("Unsupported file type.");
+     return;
+   }
    ```
 
-2. **Script splits the file list** and iterates over each path:
-   ```python
-   files = args.files.split()
-   for f in files:
-       content = Path(f).read_text()
+2. **Client POSTs** a `multipart/form-data` request to `/api/attachments/upload`, including the file and the parent `documentId`.
+
+3. **API route authenticates** the request by calling `getSession()` from `lib/auth.ts`. Unauthenticated requests are rejected with `401`.
+
+4. **API route validates** file size (max 10 MB) and MIME type server-side, independent of client-side checks.
+
+   ```ts
+   if (file.size > 10 * 1024 * 1024) {
+     return res.status(413).json({ error: "File too large." });
+   }
    ```
 
-3. **Page title is derived** from the filename stem by replacing hyphens with spaces and applying title-case:
-   ```python
-   Path(f).stem.replace('-', ' ').title()
-   # "my-new-doc.md" → "My New Doc"
-   ```
+5. **`lib/storage.ts` writes** the file to the configured storage backend (S3 bucket or local `./uploads` directory) and returns a stable URL or path.
 
-4. **Parent page ID is resolved** from the environment variable `CONFLUENCE_PARENT_PAGE_ID`.
+6. **Attachment metadata is saved** to the database via Prisma, linking the file to the document and recording the uploader's user ID.
 
-5. **Payload preview is printed to stdout**, showing title, parent page ID, and full page body per file:
-   ```
-   === CONFLUENCE PAYLOAD PREVIEW ===
+7. **API returns** the new attachment record as JSON. `AttachmentUploader` updates state, triggering `AttachmentList` to re-render.
 
-   Page title: Test
-   Parent page ID: 12345
-   Body:
-   test.md
+---
 
-   ---
-   ```
+### Download / View Flow
+
+1. **User clicks** a file link or thumbnail in `AttachmentPreview`.
+2. **Client GETs** `/api/attachments/[id]`.
+3. **API route authenticates** the session and verifies the user has read access to the parent document.
+4. **API returns** a signed URL (S3) or streams the file directly (local), with appropriate `Content-Type` and `Content-Disposition` headers.
+
+---
+
+### Delete Flow
+
+1. **User clicks the remove button** in `AttachmentPreview`.
+2. **Client sends `DELETE`** to `/api/attachments/[id]`.
+3. **API authenticates** and checks that the requester is the original uploader or has admin rights.
+4. **Storage file is deleted** via `lib/storage.ts`, then the database record is removed.
+5. **`AttachmentList` re-fetches** and removes the item from the UI.
 
 ---
 
@@ -69,29 +96,78 @@ CLI (--files) → publish_docs.py → Reads file content → Formats payload →
 
 | Variable | Description | Default |
 |---|---|---|
-| `CONFLUENCE_PARENT_PAGE_ID` | Confluence page ID under which new pages will be created | None (must be set) |
+| `STORAGE_BACKEND` | `s3` or `local` | `local` |
+| `S3_BUCKET_NAME` | Target S3 bucket for uploads | — |
+| `S3_REGION` | AWS region for the S3 bucket | `us-east-1` |
+| `AWS_ACCESS_KEY_ID` | AWS credentials for S3 access | — |
+| `AWS_SECRET_ACCESS_KEY` | AWS credentials for S3 access | — |
+| `LOCAL_UPLOAD_DIR` | Directory path for local storage | `./uploads` |
+| `MAX_FILE_SIZE_MB` | Maximum allowed upload size in MB | `10` |
+| `NEXTAUTH_SECRET` | Secret used to sign session tokens | — |
+
+---
+
+## Database Schema
+
+```prisma
+model Attachment {
+  id         String   @id @default(cuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id])
+  uploadedBy String                // User ID of uploader
+  filename   String                // Original filename
+  mimeType   String
+  sizeBytes  Int
+  storageKey String                // S3 key or local relative path
+  url        String?               // Public or signed URL (S3 only)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+```
+
+Each `Attachment` record is linked to a parent `Document`. `storageKey` is the internal identifier used by `lib/storage.ts`; `url` is populated only for S3 backends.
 
 ---
 
 ## Security Measures
 
 ### Authentication
-- No authentication is implemented in the current script; credentials are expected to be injected at a higher layer (e.g., CI environment secrets) before the real API call is made.
+- Every API route calls `getSession()` before any other logic; requests without a valid session receive `401`.
+- Session tokens are signed with `NEXTAUTH_SECRET`.
+
+### Authorization
+- Read access on `GET /api/attachments/[id]` is gated on membership/read permission for the parent document.
+- Delete access requires the requester to be the original uploader (`uploadedBy`) or to hold an admin role.
 
 ### Validation
-- The `--files` argument is required; `argparse` will exit with an error if omitted.
-- No explicit check is performed for missing or unreadable files — `Path.read_text()` will raise a `FileNotFoundError` or `PermissionError` at runtime.
+- MIME type is checked both client-side (UX) and server-side (enforcement).
+- File size is enforced server-side against `MAX_FILE_SIZE_MB`; the client also blocks oversized files early.
+- `documentId` is validated to exist and belong to the authenticated user's accessible documents before writing metadata.
+
+### Storage
+- S3 uploads use presigned URLs with short expiry for downloads; files are not publicly readable by default.
+- Local uploads are stored outside the web root and served only through the authenticated API route.
 
 ### Error Handling
-- File read errors surface as unhandled exceptions and will cause a non-zero exit code, which is compatible with CI pipeline failure detection.
-- `CONFLUENCE_PARENT_PAGE_ID` being unset results in `None` being printed in the preview but does not halt execution.
+- Errors from `lib/storage.ts` are caught in the API route; storage failures do not leave orphaned database records (write is skipped on storage error).
 
 ---
 
 ## Error Handling
 
-| Condition | Behaviour |
+| Status Code | Description |
 |---|---|
-| `--files` argument missing | `argparse` exits with code `2` and prints usage |
-| File path does not exist | `FileNotFoundError` raised; script exits with code `1` |
-| `CONFLUENCE_PARENT_PAGE_ID` not set | `None` printed as parent page ID; execution continues |
+| `400` | Missing required field (`documentId`, file) or invalid MIME type |
+| `401` | No valid session / unauthenticated request |
+| `403` | Authenticated but not authorized (wrong user, insufficient role) |
+| `404` | Attachment ID not found in the database |
+| `413` | File exceeds the maximum allowed size |
+| `500` | Unexpected server error (storage failure, database error) |
+
+---
+
+## UI Components
+
+- **`AttachmentUploader`**: File input with drag-and-drop support; performs client-side type/size validation, shows inline error messages, and POSTs to the upload API.
+- **`AttachmentPreview`**: Displays a thumbnail (images) or file-type icon (PDFs, other), an upload progress bar during active uploads, filename, file size, and a remove button that triggers the delete flow.
+- **`AttachmentList`**: Fetches and renders all `Attachment` records for a given `documentId`; re-fetches after upload or delete events; shows an empty state when no attachments exist.

@@ -1,8 +1,8 @@
-# Button Documentation: Architecture, Flow, and Component Structure
+# Button Documentation: Architecture, Flow, and Component Contract
 
 ## Overview
 
-The `Button` component is a minimal, reusable UI element that renders a standard HTML button with a text label. It is part of the `dfitch8899/flash-front-demo` frontend repository and serves as a foundational building block for interactive controls across the application.
+The `Button` component is a minimal, reusable UI primitive that renders a native HTML `<button>` element with a text label. It is part of the `flash-front-demo` frontend library and serves as a foundational building block for interactive controls across the application.
 
 ## Architecture
 
@@ -13,15 +13,16 @@ The `Button` component is a minimal, reusable UI element that renders a standard
 | `src/Button.tsx` | Defines and exports the `Button` React component |
 
 ```
-Consumer Component → <Button label="..." /> → <button> (DOM)
+Consumer Component → <Button label="..." /> → <button>{label}</button>
 ```
 
 ## Flow
 
 ### Render Flow
 
-1. **Parent component** imports `Button` from `src/Button.tsx` and passes a `label` string prop.
-2. **`Button` component** receives the prop and renders a native `<button>` element with the label as its text content.
+1. **Consumer** imports `Button` from `src/Button.tsx` and passes a `label` prop.
+2. **Component** receives the `label` string via destructured props.
+3. **Component** returns a native `<button>` element with `label` as its text content.
 
 ```tsx
 export function Button({ label }: { label: string }) {
@@ -31,16 +32,22 @@ export function Button({ label }: { label: string }) {
 
 ## Configuration
 
-No environment variables are used by this component.
+No environment variables. The component accepts no configuration beyond its props.
+
+## UI Components
+
+- **Button**: Renders a native `<button>` element. Accepts a required `label` string prop displayed as button text. No default styles, event handlers, or variant support are currently implemented.
+
+### Props
+
+| Prop | Type | Required | Description |
+|------|------|----------|-------------|
+| `label` | `string` | Yes | Text content rendered inside the button element |
 
 ## Security Measures
 
 ### Validation
-- `label` is typed as `string` via TypeScript, preventing non-string values at compile time.
+- TypeScript enforces `label` as a `string` at compile time; non-string values will produce a type error.
 
 ### Error Handling
-- No runtime error handling; relies on TypeScript compile-time type checking to enforce correct prop usage.
-
-## UI Components
-
-- **Button**: Accepts a `label` prop and renders a plain `<button>` element with that text. No styling, event handlers, or additional props are defined in the current implementation.
+- No runtime error boundaries are implemented at this level; consumers are responsible for ensuring `label` is provided.
