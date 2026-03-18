@@ -49,7 +49,6 @@ Keep the tone technical and concise. Prefer tables and bullets over paragraphs. 
 # -------------------------------------------------------
 def get_files(repo_path: Path, all_files: bool = False) -> list:
     if not all_files:
-        # Find last commits not made by docs-bot
         log = subprocess.check_output(
             ["git", "-C", str(repo_path), "log", "--format=%H %ae", "-20"],
         ).decode().splitlines()
@@ -58,16 +57,20 @@ def get_files(repo_path: Path, all_files: bool = False) -> list:
             if "docs-bot" not in line
         ]
         if len(human_commits) >= 2:
-            return subprocess.check_output(
+            files = subprocess.check_output(
                 ["git", "-C", str(repo_path), "diff", "--name-only",
                  f"{human_commits[1]}..{human_commits[0]}"],
             ).decode().splitlines()
+            if files:
+                return files
         elif len(human_commits) == 1:
-            # Only one human commit, list all files in that commit
-            return subprocess.check_output(
+            files = subprocess.check_output(
                 ["git", "-C", str(repo_path), "diff-tree", "--no-commit-id",
                  "-r", "--name-only", human_commits[0]],
             ).decode().splitlines()
+            if files:
+                return files
+    # fallback: return all tracked files
     return subprocess.check_output(
         ["git", "-C", str(repo_path), "ls-files"],
     ).decode().splitlines()
