@@ -1,13 +1,12 @@
-**Summary**: Removes the `scripts/` directory and its sole file, `publish_docs.py`, a utility script for previewing Confluence documentation payloads.
+**Summary**: Adds a daily scheduled trigger to the auto-docs workflow, enabling it to run automatically at midnight UTC in addition to existing push and manual triggers.
 
 **Files Changed**:
-- `scripts/publish_docs.py` — Deleted entirely (19 lines removed)
+- `.github/workflows/auto-docs.yml` — Added `schedule` trigger with a daily cron expression
 
 **Key Changes**:
-- Removed CLI script that accepted a `--files` argument, read file contents, and printed a formatted Confluence payload preview (page title, parent page ID, and body) to stdout
-- Eliminated dependency on `CONFLUENCE_PARENT_PAGE_ID` environment variable consumed by this script
+- Added `schedule` event trigger with cron expression `0 0 * * *` to run the auto-docs workflow once per day at midnight UTC
+- Workflow previously only triggered on pushes to `main`/`dfitch8899-docbot` branches and manual `workflow_dispatch` events
 
-**Breaking Changes**:
-- Any pipeline steps, CI jobs, or workflows invoking `scripts/publish_docs.py` will now fail; callers must be updated or removed accordingly
+**Breaking Changes**: None.
 
-**Testing Notes**: No test files were added or modified; no replacement implementation is evident from this diff.
+**Testing Notes**: None evident.
