@@ -5,6 +5,8 @@ on:
       - main
       - dfitch8899-docbot
   workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * *'  # runs every day at midnight UTC
 env:
   DOCS_DIR: docs
 permissions:
