@@ -193,9 +193,171 @@ def summarize_changes_with_ai(raw_changelog: str) -> str:
 
 
 # -------------------------------------------------------
+# Helper: get Confluence page structure
+# -------------------------------------------------------
+def get_confluence_structure() -> dict:
+    """Fetch parent page and all child pages with titles, hierarchy, and content."""
+    base = os.environ.get("CONFLUENCE_BASE_URL", "").rstrip("/")
+    email = os.environ.get("CONFLUENCE_USER_EMAIL")
+    api_token = os.environ.get("CONFLUENCE_API_TOKEN")
+    parent_id = os.environ.get("CONFLUENCE_PARENT_PAGE_ID")
+    
+    if not all((base, email, api_token, parent_id)):
+        print("Confluence structure: skipped (missing CONFLUENCE_* env vars)")
+        return {}
+    
+    try:
+        api_base = f"{base}/wiki/rest/api"
+        auth = (email, api_token)
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        
+        # Get parent page info
+        r = requests.get(f"{api_base}/content/{parent_id}", params={"expand": "space,body.storage"}, auth=auth, headers=headers, timeout=30)
+        r.raise_for_status()
+        parent_data = r.json()
+        parent_content = parent_data.get("body", {}).get("storage", {}).get("value", "")
+        
+        structure = {
+            "parent": {
+                "id": parent_id,
+                "title": parent_data.get("title", "Unknown"),
+                "content": parent_content,
+            },
+            "children": []
+        }
+        
+        # Get all child pages with content
+        r = requests.get(f"{api_base}/content/{parent_id}/child/page", params={"expand": "body.storage", "limit": 100}, auth=auth, headers=headers, timeout=30)
+        r.raise_for_status()
+        
+        for page in r.json().get("results", []):
+            child_content = page.get("body", {}).get("storage", {}).get("value", "")
+            structure["children"].append({
+                "id": page.get("id"),
+                "title": page.get("title", "Unknown"),
+                "content": child_content,
+            })
+        
+        print(f"Confluence structure: fetched parent + {len(structure['children'])} child pages")
+        return structure
+        
+    except Exception as e:
+        print(f"Error fetching Confluence structure: {e}")
+        return {}
+
+
+# -------------------------------------------------------
+# Helper: analyze docs with Claude to determine ADD/CREATE/REWRITE
+# -------------------------------------------------------
+def analyze_docs_with_claude(confluence_structure: dict, new_docs: dict) -> dict:
+    """
+    Send Confluence structure + new docs to Claude and get ADD/CREATE/REWRITE decisions.
+    
+    Args:
+        confluence_structure: dict with 'parent' and 'children' keys from get_confluence_structure()
+        new_docs: dict mapping doc title -> markdown content
+    
+    Returns:
+        dict mapping doc title -> {"action": "CREATE|ADD|REWRITE", "reason": "..."}
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        print("Claude analysis skipped (no ANTHROPIC_API_KEY)")
+        return {title: {"action": "REWRITE", "reason": "Default (no API key)"} for title in new_docs.keys()}
+    
+    try:
+        from anthropic import Anthropic
+        
+        # Format confluence structure for Claude
+        existing_pages = []
+        for child in confluence_structure.get("children", []):
+            existing_pages.append(f"- Title: {child['title']}\n  Content preview: {child['content'][:500]}...")
+        
+        confluence_str = "\n".join(existing_pages) if existing_pages else "No existing child pages"
+        
+        # Format new docs
+        new_docs_str = "\n\n".join([
+            f"### {title}\n{content[:500]}..."
+            for title, content in new_docs.items()
+        ])
+        
+        prompt = f"""You are analyzing documentation updates. Based on the existing Confluence structure and new documentation being generated, determine whether each new doc should:
+- CREATE: New page (doesn't exist yet)
+- ADD: Append to existing page (enhance without replacing)
+- REWRITE: Replace existing page content (already exists and needs full update)
+
+## Existing Confluence Pages:
+{confluence_str}
+
+## New Documentation to Publish:
+{new_docs_str}
+
+## Decision Format:
+Return ONLY valid JSON (no markdown, no preamble):
+{{
+  "doc_title_1": {{"action": "CREATE", "reason": "Brief reason"}},
+  "doc_title_2": {{"action": "REWRITE", "reason": "Brief reason"}}
+}}
+
+Decide now:"""
+        
+        client = Anthropic(api_key=api_key)
+        model = os.environ.get("CLAUDE_DOC_MODEL", "claude-sonnet-4-6")
+        fallback = "claude-3-haiku-20240307"
+        
+        for m in (model, fallback):
+            try:
+                r = client.messages.create(
+                    model=m,
+                    max_tokens=2048,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                response_text = (r.content[0].text if r.content else "").strip()
+                
+                # Extract JSON from response
+                import json
+                try:
+                    # Try direct parse first
+                    decisions = json.loads(response_text)
+                except json.JSONDecodeError:
+                    # Try to extract JSON from response if it has other text
+                    import re
+                    json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                    if json_match:
+                        decisions = json.loads(json_match.group())
+                    else:
+                        raise
+                
+                print("Claude analysis results:")
+                for title, decision in decisions.items():
+                    print(f"  {title}: {decision['action']} ({decision.get('reason', '')})")
+                
+                return decisions
+                
+            except Exception as e:
+                if ("404" in str(e) or "not_found" in str(e).lower()) and m != fallback:
+                    continue
+                print(f"Claude analysis error with {m}: {e}")
+                raise
+        
+    except Exception as e:
+        print(f"Claude analysis failed: {e}")
+        # Default to REWRITE for all
+        return {title: {"action": "REWRITE", "reason": "Default (analysis failed)"} for title in new_docs.keys()}
+
+
+# -------------------------------------------------------
 # Helper: publish a doc to Confluence
 # -------------------------------------------------------
-def publish_to_confluence(md_path: Path, title: str) -> None:
+def publish_to_confluence(md_path: Path, title: str, action: str = "REWRITE") -> None:
+    """
+    Publish markdown to Confluence with support for ADD/CREATE/REWRITE actions.
+    
+    Args:
+        md_path: Path to markdown file
+        title: Page title
+        action: "CREATE" (new page), "ADD" (append to existing), "REWRITE" (replace existing or create)
+    """
     base = os.environ.get("CONFLUENCE_BASE_URL", "").rstrip("/")
     email = os.environ.get("CONFLUENCE_USER_EMAIL")
     api_token = os.environ.get("CONFLUENCE_API_TOKEN")
@@ -203,38 +365,103 @@ def publish_to_confluence(md_path: Path, title: str) -> None:
     if not all((base, email, api_token, parent_id)):
         print("Confluence: skipped (missing CONFLUENCE_* env vars)")
         return
+    
     api_base = f"{base}/wiki/rest/api"
     auth = (email, api_token)
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    
+    # Get space key
     r = requests.get(f"{api_base}/content/{parent_id}", params={"expand": "space"}, auth=auth, headers=headers, timeout=30)
     r.raise_for_status()
     space_key = r.json()["space"]["key"]
+    
+    # Convert markdown to HTML
     md_text = md_path.read_text(encoding="utf-8")
     html = markdown.markdown(md_text, extensions=["fenced_code", "tables"])
-    storage_value = html if html.strip().startswith("<") else f"<p>{html}</p>"
-    body_payload = {"storage": {"value": storage_value, "representation": "storage"}}
+    new_html = html if html.strip().startswith("<") else f"<p>{html}</p>"
+    
+    # Check if page already exists
     r = requests.get(f"{api_base}/content/{parent_id}/child/page", auth=auth, headers=headers, timeout=30)
     r.raise_for_status()
     existing = next((p for p in r.json().get("results", []) if p.get("title") == title), None)
-    if existing:
+    
+    if action == "ADD" and existing:
+        # ADD: Append to existing page
+        page_id = existing["id"]
+        r = requests.get(f"{api_base}/content/{page_id}", params={"expand": "body.storage,version"}, auth=auth, headers=headers, timeout=30)
+        r.raise_for_status()
+        page_data = r.json()
+        existing_html = page_data.get("body", {}).get("storage", {}).get("value", "")
+        version = page_data["version"]["number"] + 1
+        
+        # Combine existing + new content
+        combined_html = f"{existing_html}\n\n{new_html}"
+        body_payload = {"storage": {"value": combined_html, "representation": "storage"}}
+        
+        r = requests.put(
+            f"{api_base}/content/{page_id}",
+            json={"id": page_id, "type": "page", "title": title, "version": {"number": version}, "body": body_payload},
+            auth=auth, headers=headers, timeout=30
+        )
+        r.raise_for_status()
+        print(f"Confluence: '{title}' APPENDED at {r.json().get('_links', {}).get('webui', '')}")
+        
+    elif action == "REWRITE" and existing:
+        # REWRITE: Replace existing page
         page_id = existing["id"]
         r = requests.get(f"{api_base}/content/{page_id}", params={"expand": "body.storage,version"}, auth=auth, headers=headers, timeout=30)
         r.raise_for_status()
         version = r.json()["version"]["number"] + 1
-        r = requests.put(f"{api_base}/content/{page_id}", json={"id": page_id, "type": "page", "title": title, "version": {"number": version}, "body": body_payload}, auth=auth, headers=headers, timeout=30)
+        
+        body_payload = {"storage": {"value": new_html, "representation": "storage"}}
+        r = requests.put(
+            f"{api_base}/content/{page_id}",
+            json={"id": page_id, "type": "page", "title": title, "version": {"number": version}, "body": body_payload},
+            auth=auth, headers=headers, timeout=30
+        )
         r.raise_for_status()
-        print(f"Confluence: '{title}' updated at", r.json().get("_links", {}).get("webui", ""))
-    else:
+        print(f"Confluence: '{title}' REWRITTEN at {r.json().get('_links', {}).get('webui', '')}")
+        
+    elif action == "ADD" and not existing:
+        # ADD requested but page doesn't exist → CREATE it instead
+        body_payload = {"storage": {"value": new_html, "representation": "storage"}}
         payload = {"type": "page", "title": title, "ancestors": [{"id": parent_id}], "space": {"key": space_key}, "body": body_payload}
         r = requests.post(f"{api_base}/content", json=payload, auth=auth, headers=headers, timeout=30)
         r.raise_for_status()
-        print(f"Confluence: '{title}' created at", r.json().get("_links", {}).get("webui", ""))
+        print(f"Confluence: '{title}' CREATED (ADD requested but didn't exist) at {r.json().get('_links', {}).get('webui', '')}")
+        
+    elif action == "REWRITE" and not existing:
+        # REWRITE requested but page doesn't exist → CREATE it instead
+        body_payload = {"storage": {"value": new_html, "representation": "storage"}}
+        payload = {"type": "page", "title": title, "ancestors": [{"id": parent_id}], "space": {"key": space_key}, "body": body_payload}
+        r = requests.post(f"{api_base}/content", json=payload, auth=auth, headers=headers, timeout=30)
+        r.raise_for_status()
+        print(f"Confluence: '{title}' CREATED (REWRITE requested but didn't exist) at {r.json().get('_links', {}).get('webui', '')}")
+        
+    else:
+        # CREATE: Fresh new page
+        if existing:
+            print(f"Confluence: '{title}' already exists (action=CREATE), skipping to avoid duplicate")
+            return
+        body_payload = {"storage": {"value": new_html, "representation": "storage"}}
+        payload = {"type": "page", "title": title, "ancestors": [{"id": parent_id}], "space": {"key": space_key}, "body": body_payload}
+        r = requests.post(f"{api_base}/content", json=payload, auth=auth, headers=headers, timeout=30)
+        r.raise_for_status()
+        print(f"Confluence: '{title}' CREATED at {r.json().get('_links', {}).get('webui', '')}")
 
 
 # -------------------------------------------------------
+# MAIN WORKFLOW
+# -------------------------------------------------------
+
+print("=== STEP 1: FETCH CONFLUENCE STRUCTURE ===")
+confluence_structure = get_confluence_structure()
+
+print("\n=== STEP 2: GENERATE CHANGELOGS ===")
+generated_docs = {}
+
 # Frontend changelog
-# -------------------------------------------------------
-print("=== FRONTEND CHANGELOG ===")
+print("\n--- FRONTEND CHANGELOG ---")
 front_commits = get_new_commits(FRONT_ROOT)
 print(f"Found {len(front_commits)} new frontend commits")
 if front_commits:
@@ -245,15 +472,12 @@ if front_commits:
     front_doc = DOCS_DIR / "frontend-changelog.md"
     front_doc.write_text(front_final)
     print("Generated:", front_doc)
-    publish_to_confluence(front_doc, "Frontend Changelog")
+    generated_docs["Frontend Changelog"] = front_final
 else:
     print("No new frontend commits, skipping.")
 
-
-# -------------------------------------------------------
 # Backend changelog
-# -------------------------------------------------------
-print("=== BACKEND CHANGELOG ===")
+print("\n--- BACKEND CHANGELOG ---")
 back_commits = get_new_commits(BACK_ROOT)
 print(f"Found {len(back_commits)} new backend commits")
 if back_commits:
@@ -264,6 +488,39 @@ if back_commits:
     back_doc = DOCS_DIR / "backend-changelog.md"
     back_doc.write_text(back_final)
     print("Generated:", back_doc)
-    publish_to_confluence(back_doc, "Backend Changelog")
+    generated_docs["Backend Changelog"] = back_final
 else:
     print("No new backend commits, skipping.")
+
+# -------------------------------------------------------
+# STEP 3: ANALYZE WITH CLAUDE FOR ADD/CREATE/REWRITE
+# -------------------------------------------------------
+print("\n=== STEP 3: ANALYZE DOCS WITH CLAUDE ===")
+if generated_docs:
+    decisions = analyze_docs_with_claude(confluence_structure, generated_docs)
+else:
+    print("No docs generated, skipping analysis.")
+    decisions = {}
+
+# -------------------------------------------------------
+# STEP 4: PUBLISH TO CONFLUENCE WITH DETERMINED ACTIONS
+# -------------------------------------------------------
+print("\n=== STEP 4: PUBLISH TO CONFLUENCE ===")
+for doc_title, decision in decisions.items():
+    action = decision.get("action", "REWRITE")
+    reason = decision.get("reason", "")
+    
+    # Map doc titles to file paths
+    doc_map = {
+        "Frontend Changelog": DOCS_DIR / "frontend-changelog.md",
+        "Backend Changelog": DOCS_DIR / "backend-changelog.md",
+    }
+    
+    doc_path = doc_map.get(doc_title)
+    if doc_path and doc_path.exists():
+        print(f"\nPublishing '{doc_title}' ({action}: {reason})")
+        publish_to_confluence(doc_path, doc_title, action=action)
+    else:
+        print(f"\nSkipping '{doc_title}' (file not found)")
+
+print("\n=== WORKFLOW COMPLETE ===")
